@@ -2,10 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { unzipSync } from "fflate";
-import { buildTarget, managedInstallation, selectAcp, RELEASES_URL, VERSION } from "./managed-acp.mjs";
+import { ACP_REPO, buildTarget, managedInstallation, MIN_ACP_VERSION, selectAcp, RELEASES_URL, VERSION } from "./managed-acp.mjs";
+import { compareDesktopVersions as compareVersions } from "./zcode-installation.mjs";
 import { runJson, resolveCommand } from "./native-cli.mjs";
 
-const API = "https://api.github.com/repos/ichinya/zcode-acp/releases/latest";
+const API = `https://api.github.com/repos/${ACP_REPO}/releases/latest`;
 const MAX_ARCHIVE = 64 * 1024 * 1024;
 const installs = new Set();
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -150,16 +151,19 @@ export function createAcpInstaller({ dataDir, fetchImpl = fetch, run = runJson, 
 // Errors whose text is safe and useful to show in the BB thread.
 export class AcpSetupError extends Error {}
 
-// Threads must never start through a non-Rust `zcode-acp` (for example an older
-// Node bridge on PATH): its errors are misleading. Without a usable Rust ACP the
-// managed one is installed once, shared by concurrent thread starts.
-export function createAcpGuard({ dataDir, installer = createAcpInstaller({ dataDir }), run = runJson, env = process.env }) {
+// Threads must never start through a non-Rust or outdated `zcode-acp` (for
+// example an older Node bridge on PATH): its errors are misleading. Without a
+// usable one the managed ACP is installed or updated once, shared by
+// concurrent thread starts.
+export function createAcpGuard({ dataDir, installer = createAcpInstaller({ dataDir }), run = runJson, env = process.env, minVersion = MIN_ACP_VERSION }) {
   const verified = new Set();
+  const recent = version => VERSION.test(version) && compareVersions(version, minVersion) >= 0;
   let installing;
-  async function rust(executable) {
+  async function usable(executable) {
     if (verified.has(executable)) return true;
-    try { if (!isRustAcp(await run(["--version"], { acpCommand: executable, timeout: 8_000 }))) return false; }
-    catch { return false; }
+    let info;
+    try { info = await run(["--version"], { acpCommand: executable, timeout: 8_000 }); } catch { return false; }
+    if (!isRustAcp(info) || !recent(info.version)) return false;
     verified.add(executable);
     return true;
   }
@@ -169,15 +173,20 @@ export function createAcpGuard({ dataDir, installer = createAcpInstaller({ dataD
     if (options.zcodeUseManagedAcp !== true) {
       let executable;
       try { executable = resolveCommand(command, env); } catch { /* reported below */ }
-      if (!executable || !(await rust(executable))) throw new AcpSetupError("The ACP executable set in the ZCode plugin settings is not Rust zcode-acp. Clear the field to use the managed ACP.");
+      if (!executable || !(await usable(executable))) throw new AcpSetupError(`The ACP executable set in the ZCode plugin settings is not Rust zcode-acp ${minVersion} or newer. Clear the field to use the managed ACP.`);
       return;
     }
-    if (managedInstallation(dataDir)) return;
-    let onPath;
-    try { onPath = resolveCommand("zcode-acp", env); } catch { /* not on PATH */ }
-    if (onPath && await rust(onPath)) return;
+    const managed = managedInstallation(dataDir);
+    if (managed && recent(managed.version)) return;
+    if (!managed) {
+      let onPath;
+      try { onPath = resolveCommand("zcode-acp", env); } catch { /* not on PATH */ }
+      if (onPath && await usable(onPath)) return;
+    }
     installing ??= installer.install().finally(() => { installing = undefined; });
-    try { await installing; }
-    catch (error) { throw new AcpSetupError(`Rust zcode-acp is not installed and the automatic installation failed (${message(error)}). Install it in the ZCode plugin settings.`); }
+    let installed;
+    try { installed = await installing; }
+    catch (error) { throw new AcpSetupError(`Rust zcode-acp ${minVersion}+ is not installed and the automatic installation failed (${message(error)}). Install it in the ZCode plugin settings.`); }
+    if (!recent(installed?.version)) throw new AcpSetupError(`The latest zcode-acp release (${installed?.version}) is older than the required ${minVersion}. Wait for a newer release.`);
   };
 }

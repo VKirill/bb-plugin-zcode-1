@@ -196,7 +196,7 @@ test("a non-Rust zcode-acp on PATH is never used: the managed Rust ACP is instal
   let installs = 0;
   const installer = { install: async () => { installs++; return f.installer.install(); } };
   const run = async (_args, { acpCommand }) => acpCommand.startsWith(bin) ? { name: "zcode-acp", runtime: "node", version: "0.1.0" } : { name: "zcode-acp", runtime: "rust", version: "0.3.1" };
-  const ensure = createAcpGuard({ dataDir: f.root, installer, run, env: { PATH: bin } });
+  const ensure = createAcpGuard({ minVersion: "0.3.1", dataDir: f.root, installer, run, env: { PATH: bin } });
   const options = { zcodeUseManagedAcp: true, acpLaunchSpec: { command: "zcode-acp" } };
   await Promise.all([ensure(options), ensure(options)]);
   assert.equal(installs, 1);
@@ -212,11 +212,23 @@ test("a Rust zcode-acp on PATH is used without installing; failures surface as a
   let installs = 0;
   const failing = { install: async () => { installs++; throw new Error("GitHub download failed (HTTP 503)"); } };
   const rust = async () => ({ name: "zcode-acp", runtime: "rust", version: "0.3.1" });
-  await createAcpGuard({ dataDir: f.root, installer: failing, run: rust, env: { PATH: bin } })({ zcodeUseManagedAcp: true, acpLaunchSpec: { command: "zcode-acp" } });
+  await createAcpGuard({ minVersion: "0.3.1", dataDir: f.root, installer: failing, run: rust, env: { PATH: bin } })({ zcodeUseManagedAcp: true, acpLaunchSpec: { command: "zcode-acp" } });
   assert.equal(installs, 0);
   const node = async () => ({ name: "zcode-acp", runtime: "node", version: "0.1.0" });
-  await assert.rejects(createAcpGuard({ dataDir: f.root, installer: failing, run: node, env: { PATH: bin } })({ zcodeUseManagedAcp: true, acpLaunchSpec: { command: "zcode-acp" } }),
+  await assert.rejects(createAcpGuard({ minVersion: "0.3.1", dataDir: f.root, installer: failing, run: node, env: { PATH: bin } })({ zcodeUseManagedAcp: true, acpLaunchSpec: { command: "zcode-acp" } }),
     error => error instanceof AcpSetupError && /automatic installation failed \(GitHub download failed \(HTTP 503\)\)/.test(error.message));
-  await assert.rejects(createAcpGuard({ dataDir: f.root, installer: failing, run: node, env: { PATH: bin } })({ zcodeUseManagedAcp: false, acpLaunchSpec: { command: path.join(bin, executable) } }),
+  await assert.rejects(createAcpGuard({ minVersion: "0.3.1", dataDir: f.root, installer: failing, run: node, env: { PATH: bin } })({ zcodeUseManagedAcp: false, acpLaunchSpec: { command: path.join(bin, executable) } }),
     error => error instanceof AcpSetupError && /not Rust zcode-acp/.test(error.message));
+});
+
+test("an outdated managed ACP is updated before a thread starts; a release older than the minimum is refused", async t => {
+  const f = fixture(t);
+  await f.installer.install();
+  assert.equal(managedInstallation(f.root).version, "0.3.1");
+  f.setVersion("0.3.2");
+  const options = { zcodeUseManagedAcp: true, acpLaunchSpec: { command: "zcode-acp" } };
+  await createAcpGuard({ minVersion: "0.3.2", dataDir: f.root, installer: f.installer, env: { PATH: "" } })(options);
+  assert.equal(managedInstallation(f.root).version, "0.3.2");
+  await assert.rejects(createAcpGuard({ minVersion: "0.4.0", dataDir: f.root, installer: f.installer, env: { PATH: "" } })(options),
+    error => error instanceof AcpSetupError && /older than the required 0\.4\.0/.test(error.message));
 });
