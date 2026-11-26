@@ -3,7 +3,7 @@ import path from "node:path";
 import { resolveCommand } from "./native-cli.mjs";
 import { nativeEnvironment } from "./zcode-installation.mjs";
 
-export const ACP_REPO = "ichinya/zcode-acp";
+export const ACP_REPO = "VKirill/zcode-acp";
 export const RELEASES_URL = `https://github.com/${ACP_REPO}/releases`;
 // Older releases block on a macOS Keychain dialog and put every native helper in the Dock.
 export const MIN_ACP_VERSION = "0.3.3";
