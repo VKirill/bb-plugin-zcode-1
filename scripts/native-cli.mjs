@@ -19,10 +19,10 @@ export function resolveCommand(command = process.env.ZCODE_ACP_BIN || "zcode-acp
   throw new Error("zcode-acp executable not found. Add it to PATH or set ACP executable in the ZCode plugin settings.");
 }
 /** @param {string[]} args
- * @param {{acpCommand?: string, nativeEntry?: string, signal?: AbortSignal, timeout?: number}} options
+ * @param {{acpCommand?: string, nativeEntry?: string, nativeEnv?: Record<string, string>, signal?: AbortSignal, timeout?: number}} options
  * @returns {Promise<unknown>} */
-export function runJson(args, { acpCommand, nativeEntry, signal, timeout = 40_000 } = {}) {
-  const env = { ...process.env, ...(nativeEntry ? { ZCODE_NATIVE_ENTRY: nativeEntry } : {}) };
+export function runJson(args, { acpCommand, nativeEntry, nativeEnv, signal, timeout = 40_000 } = {}) {
+  const env = { ...process.env, ...(nativeEntry ? { ZCODE_NATIVE_ENTRY: nativeEntry } : {}), ...nativeEnv };
   let command;
   try { command = resolveCommand(acpCommand || env.ZCODE_ACP_BIN || "zcode-acp", env); }
   catch (error) { return Promise.reject(error); }

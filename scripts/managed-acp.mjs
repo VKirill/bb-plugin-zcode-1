@@ -1,9 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCommand } from "./native-cli.mjs";
+import { nativeEnvironment } from "./zcode-installation.mjs";
 
 export const RELEASES_URL = "https://github.com/ichinya/zcode-acp/releases";
 export const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
+// BB gives the provider bridge its own bridge-data directory, while host RPC
+// installs into host-data of the same plugin. Read that plugin-owned pointer.
+export function bridgeInstallationDataDir(dataDir) {
+  return path.basename(dataDir) === "bridge-data" ? path.join(path.dirname(dataDir), "host-data") : dataDir;
+}
 
 export function buildTarget(platform = process.platform, arch = process.arch) {
   const target = { "win32-x64": "x86_64-pc-windows-msvc", "linux-x64": "x86_64-unknown-linux-gnu", "darwin-x64": "x86_64-apple-darwin", "darwin-arm64": "aarch64-apple-darwin" }[`${platform}-${arch}`];
@@ -37,9 +44,13 @@ export function resolveBridgeLine(line, dataDir) {
   // carry the same declaration under params.options.providerOptions.
   const entries = [request?.params?.providerOptions, request?.params?.options?.providerOptions];
   for (const options of entries) {
-    if (options?.zcodeUseManagedAcp !== true || !options.acpLaunchSpec) continue;
-    const installed = managedInstallation(dataDir);
-    if (installed) options.acpLaunchSpec.command = installed.executable;
+    if (!options?.acpLaunchSpec) continue;
+    if (options.zcodeUseManagedAcp === true) {
+      const installed = managedInstallation(dataDir);
+      if (installed) options.acpLaunchSpec.command = installed.executable;
+    }
+    const env = options.acpLaunchSpec.env || {};
+    options.acpLaunchSpec.env = { ...nativeEnvironment(dataDir, env.ZCODE_NATIVE_ENTRY, { ...process.env, ...env }), ...env };
   }
   return JSON.stringify(request);
 }

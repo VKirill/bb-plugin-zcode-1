@@ -25,7 +25,7 @@
     "build": "bb plugin build",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:ci",
-    "test:ci": "node --test tests/native-wire.test.mjs tests/native-entry-setting.test.mjs tests/native-cli.test.mjs tests/acp-installer.test.mjs tests/remote-link.test.mjs tests/usage-cache.test.mjs tests/usage-source.test.mjs tests/auto-tag.test.mjs",
+    "test:ci": "node --test tests/native-wire.test.mjs tests/native-entry-setting.test.mjs tests/native-cli.test.mjs tests/acp-installer.test.mjs tests/zcode-installer.test.mjs tests/remote-link.test.mjs tests/usage-cache.test.mjs tests/usage-source.test.mjs tests/auto-tag.test.mjs",
     "verify": "npm run typecheck && npm run build:cli && npm run build && npm run test:ci"
   },
   "bb": {

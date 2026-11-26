@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { definePluginApp, useRpc, useSettings } from "@get-bb/plugin-sdk/app";
+import { DesktopInstall } from "./desktop-install.js";
 import { acpRpcContract } from "./acp-contract.js";
 import type { z } from "zod";
 import type { acpStatus } from "./acp-contract.js";
@@ -109,6 +110,7 @@ function AcpSettings() {
       {data?.managed && settings.values?.acpCommand && <p className="text-muted-foreground">{text.custom}</p>}
       <p className="text-muted-foreground">{text.note}</p>
       <a className="underline" href="https://github.com/ichinya/zcode-acp/releases" target="_blank" rel="noopener noreferrer">{text.link}</a>
+      {connected && <DesktopInstall hostId={hostId} language={language} onInstalled={() => void rpc.call("zcode.refreshModels", { hostId }).catch(() => {})} />}
     </div>
   );
 }

@@ -44,7 +44,7 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
       experimental_bridgeOptions: { acpLaunchSpec: launchSpec(values) as JsonValue, zcodeUseManagedAcp: !String(values.acpCommand ?? "").trim() },
       deriveProviderOptions: context => ({ acpLaunchSpec: launchSpec(context.settings) as JsonValue, zcodeUseManagedAcp: !String(context.settings.acpCommand ?? "").trim() }),
       models: { scope: "host" },
-      maintenance: { health: true, usage: false, installation: false },
+      maintenance: { health: true, usage: false, installation: true },
       capabilities: {
         supportsServiceTier: false, supportsNativeUserQuestion: false,
         supportsManualCompaction: false, supportsThreadArchive: false, supportsThreadRename: false,
@@ -63,6 +63,19 @@ export default async function plugin(bb: BbPluginApi): Promise<void> {
     if (!machine || machine.status !== "connected") throw new Error("Select a connected computer / Выберите подключённый компьютер");
   };
   bb.rpc.register(acpRpcContract, {
+    "zcode.install": async ({ hostId, upgrade }) => {
+      await connectedHost(hostId);
+      return host.call("desktopInstall", { nativeEntry: String((await settings.get()).nativeEntry ?? "").trim(), ...(upgrade && { upgrade }) }, { hostId, timeoutMs: 15_000 });
+    },
+    "zcode.installStatus": async ({ hostId, refresh }) => {
+      await connectedHost(hostId);
+      return host.call("desktopInstallStatus", { nativeEntry: String((await settings.get()).nativeEntry ?? "").trim(), ...(refresh && { refresh }) }, { hostId, timeoutMs: 15_000 });
+    },
+    "zcode.refreshModels": async ({ hostId }) => {
+      await connectedHost(hostId);
+      await bb.sdk.providers.models({ hostId, providerId: ZCODE_CLI_PROVIDER_ID, preferCached: false, signal: AbortSignal.timeout(30_000) });
+      return { ok: true as const };
+    },
     "acp.hosts": async () => ({ hosts: (await bb.sdk.hosts.list()).filter(item => item.type !== "ephemeral").map(item => ({ id: item.id, name: item.name, connected: item.status === "connected" })) }),
     "acp.status": async ({ hostId, refresh }) => {
       await connectedHost(hostId);
