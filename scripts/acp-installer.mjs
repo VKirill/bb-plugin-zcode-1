@@ -3,13 +3,14 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { unzipSync } from "fflate";
 import { buildTarget, managedInstallation, selectAcp, RELEASES_URL, VERSION } from "./managed-acp.mjs";
-import { runJson } from "./native-cli.mjs";
+import { runJson, resolveCommand } from "./native-cli.mjs";
 
 const API = "https://api.github.com/repos/ichinya/zcode-acp/releases/latest";
 const MAX_ARCHIVE = 64 * 1024 * 1024;
 const installs = new Set();
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const message = error => error instanceof Error ? error.message : String(error);
+const isRustAcp = info => info?.runtime === "rust" && info?.name === "zcode-acp" && VERSION.test(info?.version);
 
 export function createAcpInstaller({ dataDir, fetchImpl = fetch, run = runJson, platform = process.platform, arch = process.arch }) {
   const target = buildTarget(platform, arch);
@@ -79,7 +80,7 @@ export function createAcpInstaller({ dataDir, fetchImpl = fetch, run = runJson, 
     try {
       selected = selectAcp(dataDir, acpCommand);
       const info = await run(["--version"], { acpCommand: selected.executable, signal, timeout: 8_000 });
-      if (info?.runtime !== "rust" || info?.name !== "zcode-acp" || !VERSION.test(info?.version)) throw new Error("Selected executable is not a supported Rust zcode-acp");
+      if (!isRustAcp(info)) throw new Error("Selected executable is not a supported Rust zcode-acp");
       current = { version: info.version, executable: selected.executable, source: selected.source };
     } catch (error) { currentError = message(error); }
     let latest = null, releaseError = null;
@@ -144,4 +145,39 @@ export function createAcpInstaller({ dataDir, fetchImpl = fetch, run = runJson, 
     }
   }
   return { status, install };
+}
+
+// Errors whose text is safe and useful to show in the BB thread.
+export class AcpSetupError extends Error {}
+
+// Threads must never start through a non-Rust `zcode-acp` (for example an older
+// Node bridge on PATH): its errors are misleading. Without a usable Rust ACP the
+// managed one is installed once, shared by concurrent thread starts.
+export function createAcpGuard({ dataDir, installer = createAcpInstaller({ dataDir }), run = runJson, env = process.env }) {
+  const verified = new Set();
+  let installing;
+  async function rust(executable) {
+    if (verified.has(executable)) return true;
+    try { if (!isRustAcp(await run(["--version"], { acpCommand: executable, timeout: 8_000 }))) return false; }
+    catch { return false; }
+    verified.add(executable);
+    return true;
+  }
+  return async function ensure(options) {
+    const command = options?.acpLaunchSpec?.command;
+    if (!command) return;
+    if (options.zcodeUseManagedAcp !== true) {
+      let executable;
+      try { executable = resolveCommand(command, env); } catch { /* reported below */ }
+      if (!executable || !(await rust(executable))) throw new AcpSetupError("The ACP executable set in the ZCode plugin settings is not Rust zcode-acp. Clear the field to use the managed ACP.");
+      return;
+    }
+    if (managedInstallation(dataDir)) return;
+    let onPath;
+    try { onPath = resolveCommand("zcode-acp", env); } catch { /* not on PATH */ }
+    if (onPath && await rust(onPath)) return;
+    installing ??= installer.install().finally(() => { installing = undefined; });
+    try { await installing; }
+    catch (error) { throw new AcpSetupError(`Rust zcode-acp is not installed and the automatic installation failed (${message(error)}). Install it in the ZCode plugin settings.`); }
+  };
 }
