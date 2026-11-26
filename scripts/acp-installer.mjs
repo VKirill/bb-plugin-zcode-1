@@ -32,10 +32,30 @@ export function createAcpInstaller({ dataDir, fetchImpl = fetch, run = runJson, 
     return Buffer.concat(chunks);
   }
 
+  // The anonymous REST API allows 60 requests per hour per IP, so hosts behind a
+  // shared address get 403/429. The github.com redirect to the latest tag is not
+  // metered; asset URLs then follow the fixed release layout and the SHA-256 still gates the install.
+  async function latestFromRedirect(signal) {
+    const response = await fetchImpl(`${RELEASES_URL}/latest`, { signal, redirect: "manual", headers: { "User-Agent": "bb-plugin-zcode" } });
+    const tag = /\/releases\/tag\/([^/?#]+)$/.exec(response.headers.get("location") ?? "")?.[1];
+    if (!tag) return null;
+    const tagName = decodeURIComponent(tag);
+    const prefix = `${RELEASES_URL}/download/${encodeURIComponent(tagName)}/`;
+    const names = target ? [`zcode-acp-${target}.zip`, `zcode-acp-${target}.zip.sha256`] : [];
+    return { tag_name: tagName, draft: false, prerelease: false, assets: names.map(name => ({ name, state: "uploaded", browser_download_url: prefix + name })) };
+  }
+
   async function release(refresh, signal) {
     if (!refresh && cachedAt && Date.now() - cachedAt < 15 * 60_000) return cachedRelease;
-    const bytes = await download(API, 2 * 1024 * 1024, signal);
-    const value = bytes ? JSON.parse(bytes.toString("utf8")) : null;
+    let value;
+    try {
+      const bytes = await download(API, 2 * 1024 * 1024, signal);
+      value = bytes ? JSON.parse(bytes.toString("utf8")) : null;
+    } catch (error) {
+      if (!/HTTP (403|429)\)/.test(message(error))) throw error;
+      value = await latestFromRedirect(signal);
+      if (!value) throw error;
+    }
     if (value && (value.draft || value.prerelease || typeof value.tag_name !== "string" || !value.tag_name.startsWith("v") || !VERSION.test(value.tag_name.slice(1)))) throw new Error("Unsupported ACP release; expected a stable vX.Y.Z tag");
     cachedRelease = value; cachedAt = Date.now();
     return value;

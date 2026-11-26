@@ -24,6 +24,8 @@ function fixture(t) {
     fetches++;
     options.signal?.throwIfAborted();
     if (mode === "http") return new Response("", { status: 503 });
+    if (url.includes("api.github.com") && mode === "rate-limited") return new Response("", { status: 403 });
+    if (url === `${RELEASES_URL}/latest`) return new Response(null, { status: 302, headers: { location: `${RELEASES_URL}/tag/v${version}` } });
     if (url.includes("api.github.com")) {
       if (mode === "none") return new Response("", { status: 404 });
       const prefix = `${RELEASES_URL}/download/v${version}/`;
@@ -85,6 +87,13 @@ test("failed checksum, bad archive, wrong runtime and cancellation preserve the 
   assert.equal(fs.existsSync(path.join(f.root, "escape")), false);
   await assert.rejects(f.installer.install({ signal: AbortSignal.abort() }), /abort/i);
   assert.equal(managedInstallation(f.root).executable, first.executable);
+});
+
+test("a rate-limited GitHub API falls back to the latest-release redirect and still verifies SHA-256", async t => {
+  const f = fixture(t);
+  f.setMode("rate-limited");
+  assert.deepEqual((await f.installer.status({ refresh: true })).latest, { version: "0.3.1", ready: true });
+  assert.equal((await f.installer.install()).version, "0.3.1");
 });
 
 test("settings distinguish missing releases, assembling assets and network errors; cached checks can refresh", async t => {
